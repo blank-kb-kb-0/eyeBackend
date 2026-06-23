@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智瞳工坊 - 考勤看板</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, sans-serif; background: #f0f2f5; color: #333; }
+.header { background: linear-gradient(135deg, #0091FF, #40B8FF); color: #fff; padding: 20px 30px; }
+.header h1 { font-size: 24px; }
+.header p { font-size: 14px; opacity: 0.8; margin-top: 4px; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 20px 30px; }
+.stat-card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.stat-card .num { font-size: 36px; font-weight: 700; }
+.stat-card .label { font-size: 14px; color: #999; margin-top: 4px; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 0 30px 20px; }
+.card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.card h3 { font-size: 16px; margin-bottom: 16px; }
+.chart-box { height: 300px; }
+.list-box { max-height: 300px; overflow-y: auto; }
+.list-item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f5f5f5; font-size: 14px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; color: #fff; }
+.badge-green { background: #34C759; }
+.badge-red { background: #FF3B30; }
+.badge-orange { background: #FF9500; }
+</style>
+</head>
+<body>
+<div class="header"><h1>智瞳工坊 - 课堂考勤看板</h1><p id="status">连接中...</p><div style="margin-top:10px;"><select id="classSelect" style="padding:6px 12px;border-radius:8px;border:none;font-size:14px;" onchange="selectClass()"><option value="">📚 全部班级</option></select></div></div>
+
+<div class="stats" id="stats">
+  <div class="stat-card"><div class="num" id="totalStudents">0</div><div class="label">已注册学生</div></div>
+  <div class="stat-card"><div class="num" id="presentCount">0</div><div class="label">已签到</div></div>
+  <div class="stat-card"><div class="num" id="absentCount">0</div><div class="label">未签到</div></div>
+  <div class="stat-card"><div class="num" id="abnormalCount">0</div><div class="label">异常行为</div></div>
+</div>
+
+<div class="row">
+  <div class="card"><h3>📊 出勤趋势</h3><div class="chart-box" id="trendChart"></div></div>
+  <div class="card"><h3>📋 当前课堂</h3><div class="list-box" id="sessionInfo"><p style="color:#999;">暂无进行中的课堂</p></div></div>
+</div>
+
+<div class="row" style="padding-bottom:30px;">
+  <div class="card"><h3>✅ 已签到学生</h3><div class="list-box" id="presentList"><p style="color:#999;">暂无数据</p></div></div>
+  <div class="card"><h3>⚠️ 异常行为</h3><div class="list-box" id="abnormalList"><p style="color:#999;">暂无数据</p></div></div>
+</div>
+
+<script>
+const API = '';
+let user = '';
+let trendChart = null;
+
+async function init() {
+  let params = new URLSearchParams(location.search);
+  user = params.get('user') || '';
+  if (!user) {
+    document.getElementById('status').textContent = '⚠️ 请在 URL 后添加 ?user=你的用户名（如 ?user=1）';
+    return;
+  }
+  try {
+    let r = await fetch(API + '/api/user/info?username=' + user);
+    let d = await r.json();
+    if (!d.success) {
+      document.getElementById('status').textContent = '⚠️ 用户 "' + user + '" 不存在，请先在 App 注册';
+      return;
+    }
+    loadClasses();
+    loop();
+  } catch(e) {
+    document.getElementById('status').textContent = '⚠️ 后端连接失败，请确认已启动';
+  }
+}
+
+async function loop() {
+  try {
+    let sid = await getSessionId();
+    await loadReport(sid);
+    await loadAbnormal();
+    await loadStudents();
+    updateHeader();
+  } catch(e) { console.error(e); }
+  setTimeout(loop, 5000);
+}
+
+let selectedClass = '';
+let allStudents = [];
+
+async function loadClasses() {
+  try {
+    let r = await fetch(API + '/api/class/list?username=' + user);
+    let list = await r.json();
+    let sel = document.getElementById('classSelect');
+    list.forEach(c => { let o = document.createElement('option'); o.value = c; o.text = '🏫 ' + c; sel.appendChild(o); });
+  } catch(e) {}
+  try {
+    let r = await fetch(API + '/api/student/list?username=' + user);
+    allStudents = await r.json();
+  } catch(e) { allStudents = []; }
+}
+
+function getStudentsByClass(cls) {
+  if (!cls) return allStudents;
+  return allStudents.filter(s => s.className === cls);
+}
+
+function selectClass() {
+  selectedClass = document.getElementById('classSelect').value;
+}
+
+function updateHeader() {
+  let subtitle = document.getElementById('status');
+  let clsText = selectedClass ? ' | ' + selectedClass : '';
+  subtitle.textContent = '🟢 ' + user + clsText + ' | 更新于 ' + new Date().toLocaleTimeString();
+}
+
+async function getSessionId() {
+  try {
+    let match = location.search.match(/session=([^&]+)/);
+    if (match) return match[1];
+    let r = await fetch(API + '/api/attendance/latest?username=' + user);
+    let d = await r.json();
+    return d.sessionId || '';
+  } catch(e) { return ''; }
+}
+
+async function loadReport(sid) {
+  let totalStudents = 0, presentCount = 0, absentCount = 0, presentList = [];
+
+  // 获取按班级过滤后的学生名单
+  let classStudents = getStudentsByClass(selectedClass);
+  let classNames = classStudents.map(s => s.name);
+  let nameSet = new Set(classNames);
+
+  if (sid) {
+    let r = await fetch(API + '/api/attendance/report?username=' + user + '&sessionId=' + sid);
+    let d = await r.json();
+    let allPresent = d.present || [];
+    if (selectedClass) {
+      presentList = allPresent.filter(n => nameSet.has(n));
+      totalStudents = classNames.length;
+      presentCount = presentList.length;
+    } else {
+      presentList = allPresent;
+      totalStudents = d.totalStudents || 0;
+      presentCount = d.presentCount || 0;
+    }
+    absentCount = totalStudents - presentCount;
+    document.getElementById('sessionInfo').innerHTML = '<p><strong>课堂:</strong> ' + sid + '</p><p><strong>出勤:</strong> ' + presentCount + '/' + totalStudents + '</p><p><button onclick="window.open(\'/api/attendance/export?username=' + user + '&sessionId=' + sid + '\')" style="background:#4A7DFF;color:#fff;border:none;border-radius:8px;padding:8px 20px;font-size:14px;cursor:pointer;">📥 导出考勤表</button></p>';
+  } else {
+    totalStudents = classNames.length || allStudents.length;
+    let c = await fetch(API + '/api/attendance/total?username=' + user);
+    let cd = await c.json();
+    presentCount = cd.total || 0;
+    absentCount = totalStudents - presentCount;
+    document.getElementById('sessionInfo').innerHTML = '<p style="color:#999;">无进行中的课堂（显示总数据）</p>';
+  }
+
+  document.getElementById('totalStudents').textContent = totalStudents;
+  document.getElementById('presentCount').textContent = presentCount;
+  document.getElementById('absentCount').textContent = absentCount;
+
+  let pl = '';
+  if (presentList.length) {
+    presentList.forEach(n => { pl += '<div class="list-item"><span>✅ ' + n + '</span></div>'; });
+  } else { pl = '<p style="color:#999;">暂无签到数据</p>'; }
+  document.getElementById('presentList').innerHTML = pl;
+
+  updateChart({ presentCount, absentCount });
+}
+
+function updateChart(d) {
+  if (!trendChart) {
+    trendChart = echarts.init(document.getElementById('trendChart'));
+  }
+  trendChart.setOption({
+    tooltip: { trigger: 'axis' },
+    xAxis: { type: 'category', data: ['已签到', '未签到'] },
+    yAxis: { type: 'value' },
+    series: [{
+      type: 'bar',
+      data: [
+        { value: d.presentCount || 0, itemStyle: { color: '#34C759' } },
+        { value: d.absentCount || 0, itemStyle: { color: '#FF3B30' } }
+      ],
+      barWidth: 80
+    }]
+  });
+}
+
+async function loadAbnormal() {
+  let r = await fetch(API + '/api/detection/abnormal?username=' + user);
+  let list = await r.json();
+  document.getElementById('abnormalCount').textContent = list.length || 0;
+  let html = '';
+  if (list.length) {
+    list.slice(0, 20).forEach(e => {
+      let color = e.behavior === 'sleeping' || e.behavior === 'playing_phone' ? 'badge-red' :
+                  e.behavior === 'looking_phone' || e.behavior === 'talking' ? 'badge-orange' : 'badge-green';
+      html += '<div class="list-item"><span>' + e.personName + '</span><span class="badge ' + color + '">' + (e.behaviorLabel || e.behavior) + '</span></div>';
+    });
+  } else { html = '<p style="color:#999;">暂无异常行为</p>'; }
+  document.getElementById('abnormalList').innerHTML = html;
+}
+
+async function loadStudents() {
+  let r = await fetch(API + '/api/student/list?username=' + user);
+  try { let list = await r.json(); } catch(e) {}
+}
+
+init();
+</script>
+</body>
+</html>

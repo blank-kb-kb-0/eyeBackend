@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智瞳工坊 - 学生端</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,sans-serif;background:#f0f2f5;color:#333;font-size:14px}
+.header{background:linear-gradient(135deg,#1a73e8,#0d47a1);color:#fff;padding:14px 24px;display:flex;justify-content:space-between;align-items:center}
+.header h1{font-size:18px}
+.header .status{font-size:12px;opacity:.8}
+.container{max-width:800px;margin:20px auto;padding:0 20px}
+.login-box{max-width:380px;margin:80px auto;text-align:center}
+.login-box h2{color:#1a73e8;margin-bottom:20px}
+.login-box input{width:100%;padding:12px 16px;border:1px solid #ddd;border-radius:8px;font-size:15px;margin-bottom:12px}
+.login-box button{width:100%;padding:12px;background:#1a73e8;color:#fff;border:none;border-radius:8px;font-size:16px;cursor:pointer}
+.card{background:#fff;border-radius:10px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.card h3{font-size:15px;margin-bottom:12px;color:#1a73e8}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
+.stat{background:#fff;border-radius:10px;padding:16px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.stat .num{font-size:28px;font-weight:700}
+.stat .label{font-size:12px;color:#999;margin-top:4px}
+.schedule-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.schedule-cell{background:#f9f9f9;border-radius:6px;padding:8px;min-height:60px}
+.schedule-cell .day{font-weight:600;color:#1a73e8;font-size:11px;margin-bottom:4px}
+.schedule-item{background:#e8f4fd;padding:3px 6px;border-radius:4px;margin-bottom:2px;font-size:11px;color:#333}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:#f5f7fa;padding:8px 10px;text-align:left;font-weight:600;color:#666;font-size:12px}
+td{padding:8px 10px;border-bottom:1px solid #f0f0f0}
+.badge{padding:2px 8px;border-radius:8px;font-size:11px;color:#fff}
+.bg-green{background:#34c759}
+.bg-red{background:#ff3b30}
+.bg-orange{background:#ff9500}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>📚 智瞳工坊 · 学生端</h1>
+  <span class="status" id="status">请登录</span>
+</div>
+
+<div class="container" id="loginBox">
+  <div class="login-box">
+    <h2>学生登录</h2>
+    <input type="text" id="studentName" placeholder="输入你的姓名" onkeydown="if(event.key==='Enter')doLogin()">
+    <button onclick="doLogin()">查 看 我 的 信 息</button>
+  </div>
+</div>
+
+<div id="mainContent" style="display:none">
+  <div class="container">
+    <!-- 我的信息 -->
+    <div class="stats" id="myStats">
+      <div class="stat"><div class="num" id="totalDetect" style="color:#1a73e8">0</div><div class="label">总检测</div></div>
+      <div class="stat"><div class="num" id="totalAttend" style="color:#34c759">0</div><div class="label">已签到</div></div>
+      <div class="stat"><div class="num" id="totalAbnormal" style="color:#ff3b30">0</div><div class="label">异常行为</div></div>
+    </div>
+
+    <!-- 课程表 -->
+    <div class="card">
+      <h3>📅 我的课程表</h3>
+      <div id="mySchedule"><p style="color:#999;font-size:13px">加载中...</p></div>
+    </div>
+
+    <!-- 签到记录 -->
+    <div class="card">
+      <h3>✅ 我的签到</h3>
+      <div id="myAttendance"><p style="color:#999;font-size:13px">暂无签到记录</p></div>
+    </div>
+
+    <!-- 异常行为 -->
+    <div class="card">
+      <h3>⚠️ 我的异常行为记录</h3>
+      <div id="myAbnormals"><p style="color:#999;font-size:13px">暂无异常记录</p></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let studentName = '';
+
+function doLogin() {
+  studentName = document.getElementById('studentName').value.trim();
+  if (!studentName) { alert('请输入姓名'); return; }
+  document.getElementById('status').textContent = studentName + ' · 已登录';
+  document.getElementById('loginBox').style.display = 'none';
+  document.getElementById('mainContent').style.display = 'block';
+  loadData();
+  setInterval(loadData, 5000);
+}
+
+let teacherUser = '';
+
+async function findTeacher() {
+  // 在所有教师中查找该学生
+  let candidates = [studentName, 'admin', 'teacher', '1'];
+  for (let u of candidates) {
+    try {
+      let r = await fetch('/api/student/list?username=' + u);
+      let list = await r.json();
+      if (list.some(s => s.name === studentName)) {
+        teacherUser = u;
+        return;
+      }
+    } catch(e) {}
+  }
+  teacherUser = studentName;
+}
+
+async function loadData() {
+  await findTeacher();
+  loadMySchedule();
+  loadMyAttendance();
+  loadMyAbnormals();
+}
+
+async function loadMySchedule() {
+  const days = ['周一','周二','周三','周四','周五','周六','周日'];
+  try {
+    let r = await fetch('/api/schedule/list?username=' + teacherUser);
+    let courses = await r.json();
+    let html = '<div class="schedule-grid">';
+    days.forEach((d,i) => {
+      let dayNum = String(i+1);
+      let items = courses.filter(c => c.dayOfWeek === dayNum);
+      html += `<div class="schedule-cell"><div class="day">${d}</div>`;
+      items.forEach(c => { html += `<div class="schedule-item">${c.courseName}<br><span style="font-size:10px;color:#666">${c.startTime}</span></div>`; });
+      html += '</div>';
+    });
+    document.getElementById('mySchedule').innerHTML = html + '</div>';
+  } catch(e) {
+    document.getElementById('mySchedule').innerHTML = '<p style="color:#999">暂未安排课程</p>';
+  }
+}
+
+async function loadMyAttendance() {
+  let count = 0, html = '<table><tr><th>时间</th><th>状态</th><th>备注</th></tr>';
+  try {
+    let r = await fetch('/api/attendance/records?username=' + teacherUser);
+    let records = await r.json();
+    let mine = records.filter ? records.filter(r => r.studentName === studentName) : [];
+    count = mine.length;
+    mine.slice(0,30).forEach(r => {
+      let t = new Date(r.timestamp).toLocaleString();
+      let status = r.isProxy ? '疑似代课' : (r.note && r.note.includes('迟到') ? '迟到' : '已签到');
+      let color = r.isProxy ? 'bg-orange' : (r.note && r.note.includes('迟到') ? 'bg-orange' : 'bg-green');
+      html += `<tr><td style="font-size:11px">${t}</td><td><span class="badge ${color}">${status}</span></td><td>${r.note||''}</td></tr>`;
+    });
+    document.getElementById('myAttendance').innerHTML = count ? html : '<p style="color:#999;padding:10px">暂无签到记录</p>';
+    document.getElementById('totalAttend').textContent = count;
+    document.getElementById('totalDetect').textContent = count + parseInt(document.getElementById('totalAbnormal').textContent || 0);
+  } catch(e) {}
+}
+
+async function loadMyAbnormals() {
+  let count = 0, html = '<table><tr><th>时间</th><th>行为</th><th>地点</th></tr>';
+  try {
+    let r = await fetch('/api/detection/abnormal?username=' + teacherUser);
+    let list = await r.json();
+    let mine = list.filter ? list.filter(e => e.personName === studentName) : [];
+    count = mine.length;
+    mine.slice(0,30).forEach(e => {
+      let t = new Date(e.timestamp).toLocaleString();
+      let color = e.behavior==='sleeping'||e.behavior==='fighting'?'bg-red':'bg-orange';
+      html += `<tr><td style="font-size:11px">${t}</td><td><span class="badge ${color}">${e.behaviorLabel||e.behavior}</span></td><td>${e.location}</td></tr>`;
+    });
+    document.getElementById('myAbnormals').innerHTML = count ? html : '<p style="color:#999;padding:10px">表现良好，暂无异常记录 🎉</p>';
+    document.getElementById('totalAbnormal').textContent = count;
+    document.getElementById('totalDetect').textContent = parseInt(document.getElementById('totalAttend').textContent || 0) + count;
+  } catch(e) {}
+}
+</script>
+</body>
+</html>

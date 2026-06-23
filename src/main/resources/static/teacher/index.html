@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智瞳工坊 - 教师端</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,sans-serif;background:#f0f2f5;color:#333;font-size:14px}
+.header{background:linear-gradient(135deg,#1a73e8,#0d47a1);color:#fff;padding:14px 24px;display:flex;justify-content:space-between;align-items:center}
+.header h1{font-size:18px}.header .info{font-size:12px;opacity:.8}
+.container{max-width:1200px;margin:20px auto;padding:0 20px}
+.card{background:#fff;border-radius:10px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.card h3{font-size:15px;margin-bottom:12px;color:#1a73e8}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+.stat{background:#fff;border-radius:10px;padding:16px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.stat .num{font-size:28px;font-weight:700}.stat .label{font-size:12px;color:#999;margin-top:4px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.btn{padding:7px 16px;border:none;border-radius:6px;font-size:13px;cursor:pointer;color:#fff}
+.btn-blue{background:#1a73e8}.btn-green{background:#34c759}.btn-red{background:#ff3b30}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:#f5f7fa;padding:8px 10px;text-align:left;font-weight:600;color:#666;font-size:12px}
+td{padding:8px 10px;border-bottom:1px solid #f0f0f0}
+.badge{padding:2px 8px;border-radius:8px;font-size:11px;color:#fff}
+.bg-green{background:#34c759}.bg-red{background:#ff3b30}.bg-orange{background:#ff9500}
+#videoWrap{position:relative;background:#000;border-radius:8px;overflow:hidden}
+#videoWrap video{width:100%;display:block}
+#videoWrap canvas{position:absolute;top:0;left:0;width:100%;height:100%}
+.cam-status{position:absolute;top:10px;left:10px;background:rgba(0,0,0,.7);color:#fff;padding:6px 12px;border-radius:6px;font-size:13px}
+.cam-log{height:300px;overflow-y:auto;font-size:13px;background:#1a1a2e;color:#ccc;padding:10px;border-radius:8px;font-family:monospace}
+.cam-log div{padding:4px 0;border-bottom:1px solid #333}
+.tabs{display:flex;background:#fff;padding:0 24px;border-bottom:1px solid #e0e0e0}
+.tab{padding:12px 24px;cursor:pointer;font-size:14px;color:#666;border-bottom:3px solid transparent}
+.tab.active{color:#1a73e8;border-bottom-color:#1a73e8;font-weight:600}
+select{padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px}
+.cur-class{background:linear-gradient(135deg,#1a73e8,#0d47a1);color:#fff;border-radius:10px;padding:20px;margin-bottom:14px;text-align:center}
+.cur-class .course{font-size:24px;font-weight:700}
+.cur-class .detail{font-size:14px;opacity:.8;margin-top:6px}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>📚 智瞳工坊 · 教师端</h1>
+  <div>
+    <input id="userInput" placeholder="用户名" style="padding:6px 10px;border:none;border-radius:6px;font-size:12px" value="admin">
+    <button class="btn btn-blue" onclick="switchUser()">进入</button>
+    <span class="info" id="userDisplay" style="margin-left:10px"></span>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('dashboard',this)">📊 总览</div>
+  <div class="tab" onclick="switchTab('camera',this)">🎥 摄像头检测</div>
+</div>
+
+<div id="page-dashboard" class="container">
+  <div class="cur-class" id="currentClass"><div id="curStatus">加载中...</div></div>
+  <div class="stats" id="stats"></div>
+  <div class="row2">
+    <div class="card"><h3>📋 今日课程</h3><div id="todayClasses"></div>
+      <div style="margin-top:10px"><button class="btn btn-green" onclick="startAtt()">▶ 开始课堂</button></div></div>
+    <div class="card"><h3>👥 学生列表</h3>
+      <select id="classFilter" onchange="loadStudents()" style="margin-bottom:8px"></select>
+      <div id="studentTable" style="max-height:350px;overflow-y:auto"></div></div>
+  </div>
+  <div class="card"><h3>⚠️ 本班异常事件</h3><div id="classEvents" style="max-height:250px;overflow-y:auto"></div></div>
+</div>
+
+<div id="page-camera" class="container" style="display:none">
+  <div class="row2">
+    <div class="card"><h3>🎥 摄像头画面</h3>
+      <div style="margin-bottom:8px;display:flex;gap:8px">
+        <select id="camSelect" style="flex:1"></select>
+        <button class="btn btn-green" onclick="startCam()">▶ 开启</button>
+        <button class="btn btn-red" onclick="stopCam()">⏹ 停止</button>
+      </div>
+      <div id="videoWrap">
+        <video id="video" autoplay playsinline></video>
+        <canvas id="overlay"></canvas>
+        <div class="cam-status" id="camStatus">就绪</div>
+      </div>
+    </div>
+    <div class="card"><h3>📋 签到记录</h3>
+      <div class="cam-log" id="camLog"><div style="color:#666">点击「开启」开始检测</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let user = 'admin', camStream = null, detectTimer = null;
+
+function switchTab(name, el) {
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('page-dashboard').style.display = name==='dashboard'?'block':'none';
+  document.getElementById('page-camera').style.display = name==='camera'?'block':'none';
+  if (name==='camera') loadCameras();
+}
+
+function switchUser() {
+  user = document.getElementById('userInput').value.trim()||user;
+  document.getElementById('userDisplay').textContent = '教师: '+user;
+  loadDashboard();
+  setInterval(loadDashboard, 10000);
+}
+
+async function loadDashboard() {
+  try {
+    let s=await fetch('/api/student/list?username='+user).then(r=>r.json());
+    let a=await fetch('/api/detection/abnormal?username='+user).then(r=>r.json());
+    let enrolled=s.filter(x=>x.faceImage&&x.faceImage.length>50).length;
+    document.getElementById('stats').innerHTML=`
+      <div class="stat"><div class="num" style="color:#1a73e8">${s.length}</div><div class="label">学生总数</div></div>
+      <div class="stat"><div class="num" style="color:#34c759">${enrolled}</div><div class="label">已录入人脸</div></div>
+      <div class="stat"><div class="num" style="color:#ff3b30">${a.length}</div><div class="label">异常事件</div></div>
+      <div class="stat"><div class="num" style="color:#ff9500">${s.length-enrolled}</div><div class="label">未录入</div></div>`;
+    renderStudents(s);
+    let evHtml=a.length?'<table><tr><th>时间</th><th>学生</th><th>行为</th></tr>':'<p style="color:#999;padding:10px">无</p>';
+    a.slice(0,30).forEach(e=>{
+      let c=e.behavior==='sleeping'||e.behavior==='fighting'?'bg-red':e.behavior==='playing_phone'||e.behavior==='talking'?'bg-orange':'bg-green';
+      evHtml+=`<tr><td style="font-size:11px">${new Date(e.timestamp).toLocaleString()}</td><td>${e.personName}</td><td><span class="badge ${c}">${e.behaviorLabel||e.behavior}</span></td></tr>`;
+    });
+    document.getElementById('classEvents').innerHTML=evHtml;
+  } catch(e){}
+  try {
+    let r=await fetch('/api/schedule/current?username='+user).then(r=>r.json());
+    document.getElementById('currentClass').innerHTML=r.inClass
+      ? `<div class="course">🔴 ${r.courseName}</div><div class="detail">${r.className||''} ${r.location||''} ${r.startTime}-${r.endTime}</div>`
+      : '<div style="font-size:16px">⏳ 当前无课程</div>';
+  } catch(e){}
+  try {
+    let r=await fetch('/api/schedule/today?username='+user).then(r=>r.json());
+    document.getElementById('todayClasses').innerHTML=r.length
+      ? r.map(c=>`<div style="padding:6px 0;border-bottom:1px solid #f0f0f0">📚 ${c.courseName} ${c.startTime}-${c.endTime} ${c.location||''}</div>`).join('')
+      : '<p style="color:#999">无</p>';
+  } catch(e){}
+}
+
+function renderStudents(list) {
+  let classes=[...new Set(list.map(s=>s.className).filter(Boolean))];
+  let sel=document.getElementById('classFilter');
+  sel.innerHTML='<option value="">全部</option>'+classes.map(c=>`<option value="${c}">${c}</option>`).join('');
+  let cls=sel.value;
+  if(cls)list=list.filter(s=>s.className===cls);
+  let html='<table><tr><th>姓名</th><th>班级</th><th>学号</th><th>人脸</th></tr>';
+  list.forEach(s=>{
+    let f=s.faceImage&&s.faceImage.length>50;
+    html+=`<tr><td>${s.name}</td><td>${s.className||'-'}</td><td style="font-size:12px;color:#666">${s.studentId||'-'}</td><td><span class="badge ${f?'bg-green':'bg-orange'}">${f?'✅':'⏳'}</span></td></tr>`;
+  });
+  document.getElementById('studentTable').innerHTML=html;
+}
+
+function loadStudents() {
+  fetch('/api/student/list?username='+user).then(r=>r.json()).then(renderStudents).catch(()=>{});
+}
+
+async function startAtt() {
+  try {
+    let r=await fetch('/api/attendance/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user})});
+    let d=await r.json();
+    alert('课堂已开始! Session: '+d.sessionId);
+  } catch(e){alert('启动失败');}
+}
+
+// ========== 摄像头 ==========
+function checkMediaDevices() {
+  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+
+async function loadCameras() {
+  if (!checkMediaDevices()) return;
+  try {
+    let d=await navigator.mediaDevices.enumerateDevices();
+    let sel=document.getElementById('camSelect');sel.innerHTML='';
+    d.filter(x=>x.kind==='videoinput').forEach((x,i)=>{
+      let o=document.createElement('option');o.value=x.deviceId;o.text=x.label||'摄像头'+(i+1);sel.appendChild(o);
+    });
+  } catch(e){}
+}
+
+function startCam() {
+  if(camStream)stopCam();
+  if (!checkMediaDevices()) {
+    document.getElementById('camStatus').textContent='❌ 不支持';
+    alert('❌ 浏览器不支持摄像头（非 HTTPS 或非 localhost）。\n\n✅ 推荐：在服务器用 localhost 访问\nhttp://localhost:3000/teacher/index.html\n\n或者使用 /camera/index.html?user='+user);
+    return;
+  }
+  let id=document.getElementById('camSelect').value;
+  navigator.mediaDevices.getUserMedia({video:{width:1280,height:720,deviceId:id?{exact:id}:undefined}})
+  .then(s=>{
+    camStream=s;
+    let v=document.getElementById('video');v.srcObject=s;v.play();
+    v.onloadedmetadata=()=>{let oc=document.getElementById('overlay');oc.width=v.videoWidth;oc.height=v.videoHeight;};
+    document.getElementById('camStatus').textContent='🟢 检测中';
+    addCamLog('🟢 摄像头已开启');
+    detectTimer=setInterval(detect,3000);
+    setTimeout(detect,500);
+  }).catch(e=>{
+    document.getElementById('camStatus').textContent='❌ 失败';
+    addCamLog('❌ '+e.message);
+    if(e.name==='NotAllowedError'||e.name==='PermissionDeniedError'){
+      alert('❌ 权限被拒\n请点击地址栏🔒 → 网站设置 → 摄像头 → 允许\n然后刷新');
+    } else if(e.name==='NotReadableError'){
+      alert('❌ 摄像头被占用\n请关闭其他使用摄像头的程序');
+    } else {
+      alert('❌ 开启失败: '+e.message+'\n\n推荐：在服务器上访问 http://localhost:3000/teacher/index.html');
+    }
+  });
+}
+
+function stopCam() {
+  if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null;}
+  if(detectTimer){clearInterval(detectTimer);detectTimer=null;}
+  document.getElementById('camStatus').textContent='⏹ 已停止';
+  let c=document.getElementById('overlay').getContext('2d');c.clearRect(0,0,9999,9999);
+}
+
+function addCamLog(msg) {
+  let log=document.getElementById('camLog');
+  log.innerHTML=`<div style="color:${msg.includes('✅')?'#34c759':msg.includes('🟢')?'#34c759':msg.includes('❌')?'#ff3b30':'#ccc'}">${new Date().toLocaleTimeString()} ${msg}</div>`+log.innerHTML;
+}
+
+async function detect() {
+  let v=document.getElementById('video');
+  if(!v||!v.videoWidth)return;
+  let c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;
+  let cx=c.getContext('2d');cx.drawImage(v,0,0);
+  let b64=c.toDataURL('image/jpeg',0.7).split(',')[1];
+  try {
+    let r=await fetch('/api/student/recognize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user,faceImage:b64})});
+    let d=await r.json();
+    let ov=document.getElementById('overlay').getContext('2d');
+    if(d.isMatch) {
+      ov.clearRect(0,0,9999,9999);
+      // 根据人脸框坐标精确画框
+      if(d.faceBox && Array.isArray(d.faceBox) && d.faceBox.length===4) {
+        let [fx1,fy1,fx2,fy2]=d.faceBox;
+        let v=document.getElementById('video');
+        let oc=document.getElementById('overlay');
+        let scaleX=oc.width/(v.videoWidth||640), scaleY=oc.height/(v.videoHeight||480);
+        let rx=fx1*scaleX, ry=fy1*scaleY, rw=(fx2-fx1)*scaleX, rh=(fy2-fy1)*scaleY;
+        ov.fillStyle='rgba(0,255,0,0.15)';ov.fillRect(rx,ry,rw,rh);
+        ov.strokeStyle='#00ff00';ov.lineWidth=3;ov.strokeRect(rx,ry,rw,rh);
+        let cl=Math.min(rw,rh)*0.2;ov.lineWidth=5;ov.strokeStyle='#00ff00';
+        ov.beginPath();ov.moveTo(rx,ry+cl);ov.lineTo(rx,ry);ov.lineTo(rx+cl,ry);ov.stroke();
+        ov.beginPath();ov.moveTo(rx+rw-cl,ry);ov.lineTo(rx+rw,ry);ov.lineTo(rx+rw,ry+cl);ov.stroke();
+        ov.beginPath();ov.moveTo(rx,ry+rh-cl);ov.lineTo(rx,ry+rh);ov.lineTo(rx+cl,ry+rh);ov.stroke();
+        ov.beginPath();ov.moveTo(rx+rw-cl,ry+rh);ov.lineTo(rx+rw,ry+rh);ov.lineTo(rx+rw,ry+rh-cl);ov.stroke();
+        let lb=d.name+' ('+(d.confidence*100).toFixed(0)+'%)';
+        ov.font='bold 20px sans-serif';let tw=ov.measureText(lb).width;
+        let ly=ry-8;if(ly<24)ly=ry+rh+28;
+        ov.fillStyle='rgba(0,0,0,0.6)';ov.fillRect(rx,ly-20,tw+16,26);
+        ov.fillStyle='#00ff00';ov.fillText(lb,rx+8,ly);
+      } else {
+        ov.fillStyle='rgba(0,255,0,0.2)';ov.fillRect(0,0,c.width,c.height);
+        ov.strokeStyle='#00ff00';ov.lineWidth=4;ov.strokeRect(20,20,c.width-40,c.height-40);
+        ov.fillStyle='#00ff00';ov.font='bold 36px sans-serif';ov.fillText('✅ '+d.name+' ('+(d.confidence*100).toFixed(0)+'%)',40,80);
+      }
+      await fetch('/api/attendance/record',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user,studentName:d.name,sessionId:'',isProxy:'false'})});
+      addCamLog('✅ '+d.name+' ('+(d.confidence*100).toFixed(0)+'%)');
+    } else {
+      ov.clearRect(0,0,9999,9999);
+      addCamLog('⏳ 未识别');
+    }
+  } catch(e){addCamLog('⚠️ 识别失败');}
+}
+
+switchUser();
+</script>
+</body>
+</html>

@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智瞳工坊 - 摄像头检测</title>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,sans-serif;background:#1a1a2e;color:#fff;overflow:hidden}
+.header{background:linear-gradient(135deg,#1a73e8,#0d47a1);padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.header h1{font-size:20px}.header .info{font-size:13px;opacity:.8}
+.container{display:flex;height:calc(100vh - 60px)}
+.video-wrap{flex:1;position:relative;background:#000;display:flex;align-items:center;justify-content:center}
+.video-wrap video{width:100%;height:100%;object-fit:contain}
+.video-wrap canvas{position:absolute;top:0;left:0;width:100%;height:100%}
+.sidebar{width:320px;padding:16px;overflow-y:auto;background:#16213e}
+.sidebar h3{font-size:15px;margin-bottom:12px;color:#64b5f6}
+.status-card{background:#0f3460;border-radius:12px;padding:16px;margin-bottom:12px}
+.status-card .big{font-size:36px;font-weight:700}
+.status-card .label{font-size:13px;color:#aaa;margin-top:4px}
+.controls{padding:12px;display:flex;gap:8px;flex-wrap:wrap}
+.controls button{padding:8px 20px;border:none;border-radius:8px;font-size:14px;cursor:pointer;color:#fff}
+.btn-primary{background:#1a73e8}.btn-danger{background:#ff3b30}.btn-success{background:#34c759}.btn-warning{background:#ff9500}
+select{padding:8px 12px;border-radius:8px;border:none;font-size:13px;background:#0f3460;color:#fff}
+#log{background:#0a0a1a;padding:12px;border-radius:8px;font-size:12px;color:#888;height:150px;overflow-y:auto;margin-top:8px;font-family:monospace}
+.loading{text-align:center;padding:40px;color:#999}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>📷 智瞳工坊 · 摄像头检测</h1>
+  <div>
+    <select id="cameraSelect" onchange="switchCam()" style="margin-right:8px"></select>
+    <span class="info" id="status">加载中...</span>
+  </div>
+</div>
+
+<div id="loadingScreen" class="container" style="justify-content:center;align-items:center">
+  <div class="loading"><h2>⏳ 加载人脸识别模型中...</h2><p style="margin-top:12px;font-size:14px;color:#666">首次加载约需 5-10 秒</p></div>
+</div>
+
+<div id="mainContent" class="container" style="display:none">
+  <div class="video-wrap">
+    <video id="video" autoplay playsinline></video>
+    <canvas id="overlay"></canvas>
+  </div>
+  <div class="sidebar">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+      <div class="status-card"><div class="big" id="totalCount">0</div><div class="label">已注册</div></div>
+      <div class="status-card"><div class="big" id="presentCount" style="color:#34c759">0</div><div class="label">已签到</div></div>
+    </div>
+    <div class="controls">
+      <button class="btn btn-success" onclick="startDetect()">▶ 开始</button>
+      <button class="btn btn-danger" onclick="stopDetect()">⏹ 停止</button>
+      <button class="btn btn-primary" onclick="clearLog()">清除</button>
+    </div>
+    <h3>✅ 实时签到</h3>
+    <div id="liveLog" style="margin-bottom:12px;max-height:200px;overflow-y:auto;font-size:13px;color:#aaa">就绪</div>
+    <h3>📋 检测日志</h3>
+    <div id="log">等待开始...</div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let user = new URLSearchParams(location.search).get('user') || 'admin';
+let video = document.getElementById('video');
+let overlay = document.getElementById('overlay');
+let ctx = overlay.getContext('2d');
+let stream = null;
+let detectTimer = null;
+let isDetecting = false;
+let faceMatcher = null;
+let enrolledDescriptors = [];
+let enrolledNames = [];
+
+async function init() {
+  document.getElementById('status').textContent = '用户: ' + user;
+  
+  if (!checkMediaDevices()) {
+    document.getElementById('loadingScreen').innerHTML = `
+      <div class="loading">
+        <h2>❌ 浏览器不支持摄像头</h2>
+        <p style="margin-top:12px;font-size:14px;color:#ff6b6b">
+          当前页面通过 HTTP 访问，Chrome 禁止非 HTTPS 页面调用摄像头。<br><br>
+          ✅ 推荐方案：在服务器本机用 localhost 访问<br>
+          <a href="http://localhost:3000/camera/index.html?user=${user}" style="color:#64b5f6">
+            http://localhost:3000/camera/index.html?user=${user}
+          </a>
+        </p>
+      </div>`;
+    return;
+  }
+  
+  document.getElementById('loadingScreen').style.display = 'flex';
+  
+  log('📡 使用服务器端人脸识别');
+  
+  await loadEnrolled();
+  await loadCameras();
+  await startCam();
+  
+  document.getElementById('loadingScreen').style.display = 'none';
+  document.getElementById('mainContent').style.display = 'flex';
+  loadStats();
+  setInterval(loadStats, 5000);
+}
+
+async function loadEnrolled() {
+  try {
+    let r = await fetch(API + '/api/student/list?username=' + user);
+    let list = await r.json();
+    document.getElementById('totalCount').textContent = list.length;
+    enrolledNames = list.map(s => s.name);
+    log(`📋 已加载 ${list.length} 名学生`);
+  } catch(e) {}
+}
+
+function log(msg) {
+  let d = document.getElementById('log');
+  d.innerHTML = `[${new Date().toLocaleTimeString()}] ${msg}<br>` + d.innerHTML;
+  if (d.children.length > 50) d.removeChild(d.lastChild);
+}
+
+function checkMediaDevices() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    log('❌ 浏览器不支持摄像头（非 HTTPS 或非 localhost）');
+    document.getElementById('status').textContent = '❌ 不支持摄像头';
+    return false;
+  }
+  return true;
+}
+
+async function loadCameras() {
+  if (!checkMediaDevices()) return;
+  try {
+    let devices = await navigator.mediaDevices.enumerateDevices();
+    let sel = document.getElementById('cameraSelect'); sel.innerHTML = '';
+    devices.filter(d => d.kind === 'videoinput').forEach((d, i) => {
+      let o = document.createElement('option'); o.value = d.deviceId; o.text = d.label || `摄像头 ${i+1}`;
+      sel.appendChild(o);
+    });
+  } catch(e) {}
+}
+
+async function startCam(deviceId) {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  if (!checkMediaDevices()) return;
+  deviceId = deviceId || document.getElementById('cameraSelect').value;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({video: {width: 640, height: 480, deviceId: deviceId ? {exact: deviceId} : undefined}});
+    video.srcObject = stream;
+    await video.play();
+    overlay.width = video.videoWidth || 640;
+    overlay.height = video.videoHeight || 480;
+    log('✅ 摄像头已开启');
+  } catch(e) {
+    log('❌ 摄像头开启失败: ' + e.message);
+    if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+      alert('❌ 摄像头权限被拒绝\n请点击地址栏 🔒 → 网站设置 → 摄像头 → 允许');
+    } else if (e.name === 'NotFoundError') {
+      alert('❌ 未检测到摄像头设备');
+    } else {
+      alert('❌ 摄像头开启失败。\n原因: ' + e.message + '\n\n推荐方案：\n在服务器上通过 localhost 访问：\nhttp://localhost:3000/camera/index.html?user=' + user);
+    }
+  }
+}
+
+async function switchCam() {
+  stopDetect();
+  await startCam();
+}
+
+function startDetect() {
+  if (isDetecting) return;
+  isDetecting = true;
+  log('▶️ 开始检测');
+  detectLoop();
+  detectTimer = setInterval(detectLoop, 3000);
+}
+
+function stopDetect() {
+  isDetecting = false;
+  if (detectTimer) { clearInterval(detectTimer); detectTimer = null; }
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  log('⏹ 已停止');
+}
+
+async function detectLoop() {
+  if (!isDetecting || !video.videoWidth) return;
+  
+  try {
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    
+    // 拍照并发送到服务器做识别
+    let c = document.createElement('canvas');
+    c.width = video.videoWidth; c.height = video.videoHeight;
+    let cx = c.getContext('2d'); cx.drawImage(video, 0, 0);
+    let b64 = c.toDataURL('image/jpeg', 0.7).split(',')[1];
+    
+    let r = await fetch(API + '/api/student/recognize', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username: user, faceImage: b64})
+    });
+    let result = await r.json();
+    
+    if (result.isMatch) {
+      // 根据人脸框坐标精确画框
+      if (result.faceBox && Array.isArray(result.faceBox) && result.faceBox.length === 4) {
+        let [fx1, fy1, fx2, fy2] = result.faceBox;
+        // faceBox 是相对于原始视频帧的像素坐标，需要映射到 overlay canvas
+        let scaleX = overlay.width / (video.videoWidth || 640);
+        let scaleY = overlay.height / (video.videoHeight || 480);
+        let rx = fx1 * scaleX, ry = fy1 * scaleY;
+        let rw = (fx2 - fx1) * scaleX, rh = (fy2 - fy1) * scaleY;
+        // 画半透明填充
+        ctx.fillStyle = 'rgba(0,255,0,0.15)';
+        ctx.fillRect(rx, ry, rw, rh);
+        // 画边框
+        ctx.strokeStyle = '#00FF00';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(rx, ry, rw, rh);
+        // 画角标（左上、右上、左下、右下各画一个L形角标）
+        let cornerLen = Math.min(rw, rh) * 0.2;
+        ctx.lineWidth = 5;
+        ctx.strokeStyle = '#00FF00';
+        // 左上
+        ctx.beginPath(); ctx.moveTo(rx, ry + cornerLen); ctx.lineTo(rx, ry); ctx.lineTo(rx + cornerLen, ry); ctx.stroke();
+        // 右上
+        ctx.beginPath(); ctx.moveTo(rx + rw - cornerLen, ry); ctx.lineTo(rx + rw, ry); ctx.lineTo(rx + rw, ry + cornerLen); ctx.stroke();
+        // 左下
+        ctx.beginPath(); ctx.moveTo(rx, ry + rh - cornerLen); ctx.lineTo(rx, ry + rh); ctx.lineTo(rx + cornerLen, ry + rh); ctx.stroke();
+        // 右下
+        ctx.beginPath(); ctx.moveTo(rx + rw - cornerLen, ry + rh); ctx.lineTo(rx + rw, ry + rh); ctx.lineTo(rx + rw, ry + rh - cornerLen); ctx.stroke();
+        // 姓名标签
+        let label = `${result.name} (${(result.confidence*100).toFixed(0)}%)`;
+        ctx.font = 'bold 20px sans-serif';
+        let textW = ctx.measureText(label).width;
+        let labelY = ry - 8;
+        if (labelY < 24) labelY = ry + rh + 28;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(rx, labelY - 20, textW + 16, 26);
+        ctx.fillStyle = '#00FF00';
+        ctx.fillText(label, rx + 8, labelY);
+      } else {
+        // 无框坐标时回退到全屏覆盖
+        ctx.fillStyle = 'rgba(0,255,0,0.15)';
+        ctx.fillRect(0, 0, overlay.width, overlay.height);
+        ctx.fillStyle = '#00FF00';
+        ctx.font = 'bold 36px sans-serif';
+        ctx.fillText(`✅ ${result.name} (${(result.confidence*100).toFixed(0)}%)`, 50, 80);
+      }
+      
+      await fetch(API + '/api/attendance/record', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({username: user, studentName: result.name, sessionId: '', isProxy: 'false'})
+      });
+      addLiveLog(`✅ ${result.name} (${(result.confidence*100).toFixed(0)}%)`);
+      loadStats();
+    } else {
+      addLiveLog('⏳ 未识别');
+    }
+  } catch(e) {
+    log('⚠️ 检测异常: ' + e.message);
+  }
+}
+
+function addLiveLog(msg) {
+  let log = document.getElementById('liveLog');
+  log.innerHTML = `<div style="color:${msg.includes('✅')?'#34c759':msg.includes('⏳')?'#888':'#aaa'};padding:4px 0;border-bottom:1px solid #1a1a2e">${new Date().toLocaleTimeString()} ${msg}</div>` + log.innerHTML;
+}
+
+async function loadStats() {
+  try {
+    let r = await fetch(API + '/api/attendance/total?username=' + user);
+    let d = await r.json();
+    document.getElementById('presentCount').textContent = d.total || 0;
+  } catch(e) {}
+}
+
+function clearLog() { document.getElementById('log').innerHTML = '已清除'; }
+
+init();
+</script>
+</body>
+</html>

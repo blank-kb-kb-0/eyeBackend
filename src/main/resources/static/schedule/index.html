@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智瞳工坊 - 课程管理</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,sans-serif;background:#f0f2f5;color:#333}
+.header{background:linear-gradient(135deg,#1a73e8,#0d47a1);color:#fff;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+.header h1{font-size:20px}
+.container{max-width:1200px;margin:20px auto;padding:0 20px}
+.card{background:#fff;border-radius:12px;padding:20px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.card h3{font-size:16px;margin-bottom:12px;color:#1a73e8}
+.row{display:flex;gap:12px;margin-bottom:12px;align-items:center}
+.row label{font-size:13px;color:#666;width:60px}
+.row input,.row select{flex:1;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{background:#f5f7fa;padding:10px 12px;text-align:left;font-weight:600;color:#666;font-size:13px}
+td{padding:10px 12px;border-bottom:1px solid #f0f0f0}
+.btn{padding:8px 20px;border:none;border-radius:8px;font-size:14px;cursor:pointer;color:#fff}
+.btn-blue{background:#1a73e8}
+.btn-red{background:#ff3b30}
+.btn-green{background:#34c759}
+.tip{font-size:13px;color:#999;margin-bottom:12px}
+.badge{padding:2px 8px;border-radius:8px;font-size:12px;color:#fff;display:inline-block}
+.bg-green{background:#34c759;padding:4px 12px}
+.bg-red{background:#ff3b30}
+.auto-badge{display:inline-block;padding:4px 12px;border-radius:8px;font-size:13px;background:#e8f4fd;color:#1a73e8;margin-left:8px}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>📚 智瞳工坊 · 课程管理</h1>
+  <div>
+    <input id="userInput" placeholder="教师用户名" style="padding:6px 12px;border:none;border-radius:6px;font-size:13px;margin-right:8px" value="admin">
+    <button class="btn btn-blue" onclick="loadSchedule()">切换</button>
+  </div>
+</div>
+
+<div class="container">
+  <div class="card" id="currentClass">
+    <h3>🕐 当前课程</h3>
+    <div id="currentInfo" style="font-size:16px">加载中...</div>
+  </div>
+
+  <div class="card">
+    <h3>➕ 添加课程</h3>
+    <div class="row"><label>课程名</label><input id="courseName" placeholder="如：高等数学"></div>
+    <div class="row"><label>班级</label><input id="className" placeholder="如：计算机1班"></div>
+    <div class="row"><label>星期</label>
+      <select id="dayOfWeek">
+        <option value="1">周一</option><option value="2">周二</option><option value="3">周三</option>
+        <option value="4">周四</option><option value="5">周五</option><option value="6">周六</option><option value="7">周日</option>
+      </select>
+    </div>
+    <div class="row"><label>开始</label><input id="startTime" type="time" value="08:00"></div>
+    <div class="row"><label>结束</label><input id="endTime" type="time" value="09:40"></div>
+    <div class="row"><label>地点</label><input id="location" placeholder="如：教学楼301"></div>
+    <div class="row">
+      <button class="btn btn-green" onclick="addCourse()">添加</button>
+      <button class="btn btn-red" onclick="clearAll()" style="margin-left:8px">清空全部</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>📋 课程表</h3>
+    <div class="tip">提示：到上课时间系统会自动显示状态，可在「课堂考勤」中手动开始课堂</div>
+    <div style="margin-bottom:12px">
+      <button class="btn btn-green" onclick="exportSample()">📥 下载模版</button>
+      <button class="btn btn-blue" onclick="document.getElementById('fileInput').click()" style="margin-left:8px">📤 导入 Excel</button>
+      <input type="file" id="fileInput" accept=".csv" style="display:none" onchange="importCSV(event)">
+    </div>
+    <div id="scheduleList"><p style="color:#999">加载中...</p></div>
+  </div>
+</div>
+
+<script>
+let user = 'admin';
+let courses = [];
+
+async function loadSchedule() {
+  user = document.getElementById('userInput').value.trim() || user;
+  try {
+    let r = await fetch('/api/schedule/list?username=' + user);
+    courses = await r.json();
+    renderSchedule();
+    loadCurrent();
+  } catch(e) {
+    document.getElementById('scheduleList').innerHTML = '<p style="color:#999">加载失败</p>';
+  }
+}
+
+async function loadCurrent() {
+  try {
+    let r = await fetch('/api/schedule/current?username=' + user);
+    let d = await r.json();
+    if (d.inClass) {
+      document.getElementById('currentInfo').innerHTML =
+        `<span class="badge bg-green" style="font-size:16px;padding:6px 16px">🔴 上课中</span>
+         <span class="auto-badge">${d.courseName}</span>
+         <span class="auto-badge">${d.className}</span>
+         <span class="auto-badge">${d.location}</span>
+         <span class="auto-badge">${d.startTime}-${d.endTime}</span>`;
+    } else {
+      let today = await fetch('/api/schedule/today?username=' + user).then(r => r.json());
+      if (today.length > 0) {
+        let next = today[0];
+        document.getElementById('currentInfo').innerHTML =
+          `<span style="color:#999">⏳ 当前无课程 · 下一节: ${next.courseName} ${next.startTime}-${next.endTime}</span>`;
+      } else {
+        document.getElementById('currentInfo').innerHTML = '<span style="color:#999">📅 今天无课程安排</span>';
+      }
+    }
+  } catch(e) {}
+}
+
+function renderSchedule() {
+  const days = ['周一','周二','周三','周四','周五','周六','周日'];
+  let html = '<table><tr><th>时间</th>';
+  days.forEach(d => html += `<th>${d}</th>`);
+  html += '</tr>';
+
+  let timeSlots = [];
+  courses.forEach(c => {
+    let key = c.startTime + '-' + c.endTime;
+    if (!timeSlots.find(t => t.key === key)) timeSlots.push({key,start:c.startTime,end:c.endTime});
+  });
+  timeSlots.sort((a,b) => a.start.localeCompare(b.start));
+
+  timeSlots.forEach(slot => {
+    html += `<tr><td style="font-weight:600;font-size:12px">${slot.start}<br>${slot.end}</td>`;
+    days.forEach((d, i) => {
+      let dayNum = String(i + 1);
+      let found = courses.filter(c => c.dayOfWeek === dayNum && c.startTime === slot.start);
+      if (found.length) {
+        html += `<td style="background:#e8f4fd">`;
+        found.forEach(c => {
+          html += `<div style="font-weight:600;font-size:13px">${c.courseName}</div>
+                   <div style="font-size:11px;color:#666">${c.className||''} ${c.location||''}</div>`;
+        });
+        html += `</td>`;
+      } else {
+        html += `<td style="color:#ddd;font-size:20px;text-align:center">·</td>`;
+      }
+    });
+    html += '</tr>';
+  });
+  document.getElementById('scheduleList').innerHTML = html || '<p style="color:#999">暂无课程，请添加</p>';
+}
+
+async function addCourse() {
+  let c = {
+    courseName: document.getElementById('courseName').value.trim(),
+    className: document.getElementById('className').value.trim(),
+    dayOfWeek: document.getElementById('dayOfWeek').value,
+    startTime: document.getElementById('startTime').value,
+    endTime: document.getElementById('endTime').value,
+    location: document.getElementById('location').value.trim()
+  };
+  if (!c.courseName) { alert('请输入课程名'); return; }
+  try {
+    await fetch('/api/schedule/import', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({username: user, courses: [c]})
+    });
+    document.getElementById('courseName').value = '';
+    document.getElementById('className').value = '';
+    document.getElementById('location').value = '';
+    loadSchedule();
+  } catch(e) { alert('添加失败'); }
+}
+
+async function clearAll() {
+  if (!confirm('确定清空全部课程？')) return;
+  try {
+    await fetch('/api/schedule/clear?username=' + user, {method: 'DELETE'});
+    loadSchedule();
+  } catch(e) {}
+}
+
+function exportSample() {
+  let csv = 'courseName,dayOfWeek,startTime,endTime,className,location\n高等数学,周一,08:00,09:40,计算机1班,教学楼301\n';
+  let blob = new Blob(['\ufeff' + csv], {type:'text/csv;charset=utf-8'});
+  let a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = '课程表模版.csv'; a.click();
+}
+
+function importCSV(e) {
+  let file = e.target.files[0]; if (!file) return;
+  let reader = new FileReader();
+  reader.onload = async function(ev) {
+    let lines = ev.target.result.split('\n').filter(l => l.trim());
+    if (lines.length < 2) { alert('文件为空'); return; }
+    let headers = lines[0].split(',').map(h => h.trim());
+    let courses = [];
+    for (let i = 1; i < lines.length; i++) {
+      let vals = lines[i].split(',').map(v => v.trim());
+      if (vals.length < 3) continue;
+      let c = {};
+      headers.forEach((h, idx) => { c[h] = vals[idx] || ''; });
+      courses.push(c);
+    }
+    try {
+      let r = await fetch('/api/schedule/import', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({username: user, courses})
+      });
+      let d = await r.json();
+      alert(d.message);
+      loadSchedule();
+    } catch(e) { alert('导入失败'); }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+}
+
+loadSchedule();
+setInterval(loadCurrent, 10000);
+</script>
+</body>
+</html>
