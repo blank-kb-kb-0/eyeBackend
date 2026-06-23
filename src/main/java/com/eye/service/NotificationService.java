@@ -10,7 +10,7 @@ import java.nio.charset.StandardCharsets;
 
 @Service
 public class NotificationService {
-    private static final String SEND_KEY = "SCT242116TIl3xqO4Cd7H1Tk87CStxfnJw";
+    private static final String SEND_KEY = "YOUR_SERVERCHAN_KEY";
     private static final String SERVER_CHAN_URL = "https://sctapi.ftqq.com/" + SEND_KEY + ".send";
 
     private final HttpClient client = HttpClient.newHttpClient();
